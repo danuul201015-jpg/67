@@ -6,7 +6,6 @@
     <application
         android:allowBackup="true"
         android:label="MC Mod Builder"
-        android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.MCModBuilder"
         android:usesCleartextTraffic="false">
 
