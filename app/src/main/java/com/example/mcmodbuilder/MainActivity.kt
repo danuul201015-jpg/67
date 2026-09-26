@@ -191,10 +191,27 @@ fun AppRoot() {
 
                 downloadReady?.let { (name, bytes) ->
                     Button(onClick = {
-                        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
-                        val outFile = File(dir, name)
-                        FileOutputStream(outFile).use { it.write(bytes) }
-                        status = "Сохранено: ${outFile.absolutePath}"
+                        try {
+                            val resolver = context.contentResolver
+                            val values = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                                put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/java-archive")
+                                put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                            }
+                            val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                            val itemUri = resolver.insert(collection, values)
+                            if (itemUri == null) {
+                                status = "Не удалось создать файл в Downloads"
+                            } else {
+                                resolver.openOutputStream(itemUri)?.use { it.write(bytes) }
+                                values.clear()
+                                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                                resolver.update(itemUri, values, null, null)
+                                status = "Сохранено в Downloads: $name"
+                            }
+                        } catch (e: Exception) {
+                            status = "Ошибка сохранения: ${e.message}"
+                        }
                     }) {
                         Text("Сохранить .jar на телефон")
                     }
