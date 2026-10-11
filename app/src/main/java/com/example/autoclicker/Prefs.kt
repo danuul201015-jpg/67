@@ -52,7 +52,7 @@ class Prefs(c: Context) {
 
     /** Пауза между нажатиями цифр (синие точки), мс — чтобы приложение не теряло цифры */
     var digitDelay: Int
-        get() = sp.getInt("digitDelay", 250)
+        get() = sp.getInt("digitDelay", 400)
         set(v) { sp.edit().putInt("digitDelay", v).apply() }
 
     /** Пауза после отмены своего запроса (розовые точки) перед следующей проверкой, мс */

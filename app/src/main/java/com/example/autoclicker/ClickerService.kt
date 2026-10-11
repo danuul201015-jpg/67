@@ -493,8 +493,7 @@ class ClickerService : AccessibilityService() {
             val txt = t3?.trim() ?: ""
             if (txt.isNotEmpty()) {
                 val v = parseNum(txt)
-                // неполное распознавание («17» вместо «172») запросом не считаем
-                if (v == null || v.toLong().toString().length != b.toLong().toString().length) {
+                if (v == null) {
                     setStatus(head + "область 3 не прочитана: '${txt.take(12)}'")
                     schedule(delayMs)
                     return
@@ -569,7 +568,6 @@ class ClickerService : AccessibilityService() {
 
         // 4. Своего запроса не видно: ставим, только если пусто несколько проверок подряд
         //    и наша прошлая ставка уже не на верху
-        cancelTries = 0
         if (blankStreak < cfg.confirmCount) {
             setStatus(head + "запроса нет (${blankStreak}/${cfg.confirmCount})")
             schedule(delayMs)
@@ -639,13 +637,14 @@ class ClickerService : AccessibilityService() {
         val base = Math.floor(if (cfg.outbidRegion == 1) a else b).toLong()
         val target = base + cfg.step
         val typed = mutableListOf<Step>()
-        for (ch in target.toString()) {
+        val ds = target.toString()
+        for ((idx, ch) in ds.withIndex()) {
             val p = digits[ch - '0']
             if (p == null) {
                 setStatus(head + "нет синей точки для цифры $ch")
                 return null
             }
-            typed.add(Step(p.x, p.y, dd))
+            typed.add(Step(p.x, p.y, if (idx == ds.length - 1) dd * 2 else dd))
         }
         setStatus(head + "перебиваю область ${cfg.outbidRegion}: $base → $target ✔")
         // красные → синие (цифры) → оранжевые → красные
@@ -668,7 +667,7 @@ class ClickerService : AccessibilityService() {
         val path = Path()
         path.moveTo(st.x, st.y)
         val g = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 50))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 100))
             .build()
         val next = Runnable { runSteps(steps, i + 1, 0, onEnd) }
         val again = Runnable { runSteps(steps, i, tries + 1, onEnd) }
