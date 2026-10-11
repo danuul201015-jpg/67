@@ -56,9 +56,12 @@ class ClickerService : AccessibilityService() {
     private var streakUnp = 0
     private var blankStreak = 0
     private var cancelTries = 0
+    // когда нажали розовые: неудача, только если запрос всё ещё стоит спустя CANCEL_WINDOW_MS
+    private var cancelSentAt = 0L
+    private val CANCEL_WINDOW_MS = 6000L
     private var lastBidAt = 0L
     private var lastBidTarget: Double? = null
-    private val MAX_CANCEL = 2
+    private val MAX_CANCEL = 5
 
     /** Одно нажатие + пауза после него */
     private data class Step(val x: Float, val y: Float, val delay: Long)
@@ -387,6 +390,7 @@ class ClickerService : AccessibilityService() {
         streakUnp = 0
         cancelTries = 0
         blankStreak = 0
+        cancelSentAt = 0L
         lastBidAt = 0L
         lastBidTarget = null
         val t0 = SystemClock.elapsedRealtime()
@@ -569,12 +573,13 @@ class ClickerService : AccessibilityService() {
             streakOut = 0
             pendingKey = null
             cancelTries = 0
+            cancelSentAt = 0L
             setStatus(head + "запрос стоит ✔")
             schedule(delayMs)
             return
         }
 
-        // 3. Выгодно, но нас перебили: отменяем свой запрос, потом ставим выше (только после подтверждений)
+        // 3. Выгодно, но нас перебили: отменяем свой запрос, потом ставим выше
         if (own != null) {
             pendingKey = null
             if (holding) {
@@ -582,13 +587,24 @@ class ClickerService : AccessibilityService() {
                 schedule(delayMs)
                 return
             }
+            if (cancelSentAt != 0L) {
+                if (now - cancelSentAt < CANCEL_WINDOW_MS) {
+                    setStatus(head + "жду, пока запрос снимется")
+                    schedule(delayMs)
+                    return
+                }
+                // розовые нажимались, а запрос всё стоит: отмена не сработала
+                cancelSentAt = 0L
+                cancelTries++
+                streakOut = cfg.confirmCount - 1
+            }
             if (pinks.isEmpty()) {
                 setStatus(head + "перебили, нет розовых точек для отмены")
                 schedule(delayMs)
                 return
             }
             if (cancelTries >= MAX_CANCEL) {
-                setStatus(head + "отмена не сработала, проверьте розовые точки")
+                setStatus(head + "розовые нажаты $MAX_CANCEL раз, запрос не снимается: проверьте точки")
                 schedule(cfg.cooldown.toLong())
                 return
             }
@@ -599,14 +615,19 @@ class ClickerService : AccessibilityService() {
                 return
             }
             streakOut = 0
-            cancelTries++
-            cancelOwn(head, pinks, "перебили → отменяю свой запрос")
+            cancelSentAt = now
+            cancelOwn(head, pinks, "перебили → отменяю свой запрос (попытка ${cancelTries + 1}/$MAX_CANCEL)")
             return
         }
         streakOut = 0
 
         // 4. Своего запроса не видно: ставим, только если пусто несколько проверок подряд
         //    и наша прошлая ставка уже не на верху
+        // своего запроса не видно: если мы его отменяли, отмена прошла
+        if (cancelSentAt != 0L) {
+            cancelSentAt = 0L
+            cancelTries = 0
+        }
         if (blankStreak < cfg.confirmCount) {
             setStatus(head + "запроса нет (${blankStreak}/${cfg.confirmCount})")
             schedule(delayMs)
