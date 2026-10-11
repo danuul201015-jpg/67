@@ -4,24 +4,8 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- мишень: кольцо -->
-    <path
-        android:strokeColor="#4FD1FF"
-        android:strokeWidth="4"
-        android:pathData="M30,50 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0" />
-    <!-- засечки -->
-    <path
-        android:strokeColor="#4FD1FF"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:pathData="M50,22 L50,30 M50,70 L50,78 M22,50 L30,50 M70,50 L78,50" />
-    <!-- центр -->
-    <path android:fillColor="#FF5FB4" android:pathData="M44,50 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
-    <!-- курсор -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:strokeColor="#14213D"
-        android:strokeWidth="2"
-        android:strokeLineJoin="round"
-        android:pathData="M58,56 L58,86 L65,79 L70,90 L76,87.5 L71,76.5 L81,76.5 Z" />
+    <path android:strokeColor="#FF7A1A" android:strokeWidth="4" android:pathData="M30,50 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0" />
+    <path android:strokeColor="#FFB26B" android:strokeWidth="4" android:strokeLineCap="round" android:pathData="M50,22 L50,30 M50,70 L50,78 M22,50 L30,50 M70,50 L78,50" />
+    <path android:fillColor="#FF7A1A" android:pathData="M44,50 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#FFFFFF" android:strokeColor="#0A0A0B" android:strokeWidth="2" android:strokeLineJoin="round" android:pathData="M58,56 L58,86 L65,79 L70,90 L76,87.5 L71,76.5 L81,76.5 Z" />
 </vector>

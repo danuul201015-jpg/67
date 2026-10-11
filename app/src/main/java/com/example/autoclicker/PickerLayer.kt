@@ -61,7 +61,7 @@ class PickerLayer(
             v.text = t
             v.textSize = if (digitMode) 16f else 18f
             v.setTextColor(Color.WHITE)
-            v.setBackgroundColor(0xEE224488.toInt())
+            v.background = Ui.round(ctx, 0xEE15151A.toInt(), 12, Ui.ORANGE)
             val pad = if (digitMode) 24 else 36
             v.setPadding(pad, 24, pad, 24)
             v.setOnClickListener { f() }
@@ -186,7 +186,7 @@ class PickerLayer(
             paint.color = Color.WHITE
             paint.textSize = 34f
             paint.textAlign = Paint.Align.CENTER
-            canvas.drawText("⏱${i + 1}", t.x, t.y + 12f, paint)
+            canvas.drawText("T${i + 1}", t.x, t.y + 12f, paint)
             paint.textSize = 24f
             canvas.drawText("${if (t.sec == Math.floor(t.sec)) t.sec.toLong().toString() else t.sec.toString()}с", t.x, t.y + 62f, paint)
         }

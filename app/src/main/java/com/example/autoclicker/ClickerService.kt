@@ -2,6 +2,7 @@ package com.example.autoclicker
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
@@ -16,6 +17,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -38,7 +40,7 @@ class ClickerService : AccessibilityService() {
     private lateinit var panelLp: WindowManager.LayoutParams
     private var statusView: TextView? = null
     private val tools = mutableListOf<View>()
-    private var toggleBtn: TextView? = null
+    private var toggleBtn: ImageView? = null
     private var running = false
     private var pendingKey: String? = null
     private var pendingSince = 0L
@@ -47,9 +49,14 @@ class ClickerService : AccessibilityService() {
     private var timerIdx = 0
     private var timerNext = 0L
     private var timerCount = 0
-    // Отмена своего запроса перед перебитием
-    private var lastCancelAt = 0L
+    // Подтверждения: отмена и ставка только после нескольких одинаковых проверок подряд
+    private var streakOut = 0
+    private var streakUnp = 0
+    private var blankStreak = 0
     private var cancelTries = 0
+    private var lastBidAt = 0L
+    private var lastBidTarget: Double? = null
+    private val MAX_CANCEL = 2
 
     /** Одно нажатие + пауза после него */
     private data class Step(val x: Float, val y: Float, val delay: Long)
@@ -80,9 +87,21 @@ class ClickerService : AccessibilityService() {
         v.text = t
         v.textSize = size
         v.setTextColor(Color.WHITE)
-        v.setBackgroundColor(0xCC222222.toInt())
+        v.background = Ui.round(this, 0xDD121216.toInt(), 12, Ui.BORDER)
         v.setPadding(28, 18, 28, 18)
         v.gravity = Gravity.CENTER
+        if (click != null) v.setOnClickListener { click() }
+        return v
+    }
+
+    /** Кнопка-иконка панели: векторный SVG-путь, без эмодзи */
+    private fun iconBtn(res: Int, click: (() -> Unit)? = null): ImageView {
+        val v = ImageView(this)
+        v.setImageResource(res)
+        val pad = Ui.dp(this, 12)
+        v.setPadding(pad, pad, pad, pad)
+        v.background = Ui.round(this, 0xDD121216.toInt(), 12, Ui.BORDER)
+        v.scaleType = ImageView.ScaleType.CENTER
         if (click != null) v.setOnClickListener { click() }
         return v
     }
@@ -110,7 +129,7 @@ class ClickerService : AccessibilityService() {
         panelLp.x = 0
         panelLp.y = 400
 
-        val handle = tv("≡")
+        val handle = iconBtn(R.drawable.ic_grip)
         handle.setOnTouchListener(object : View.OnTouchListener {
             var sx = 0f; var sy = 0f; var ox = 0; var oy = 0
             override fun onTouch(v: View, e: MotionEvent): Boolean {
@@ -127,20 +146,20 @@ class ClickerService : AccessibilityService() {
         })
         add(handle)
 
-        val toggle = tv("▶") { toggle() }
+        val toggle = iconBtn(R.drawable.ic_play) { toggle() }
         toggleBtn = toggle
         add(toggle)
 
         val b1 = tv("1") { showPicker(true, 1) }
         val b2 = tv("2") { showPicker(true, 2) }
         val b3 = tv("3") { showPicker(true, 3) }
-        val bt = tv("＋") { showPicker(false, 0) }
-        val bd = tv("🔵") { showDigitPicker() }
-        val bg = tv("🟢") { showGreenPicker() }
-        val bo = tv("🟠") { showOrangePicker() }
-        val bp = tv("💗") { showPinkPicker() }
-        val btm = tv("⏱") { showTimerPicker() }
-        val bc = tv("🗑") {
+        val bt = iconBtn(R.drawable.ic_plus) { showPicker(false, 0) }
+        val bd = iconBtn(R.drawable.ic_dot_blue) { showDigitPicker() }
+        val bg = iconBtn(R.drawable.ic_dot_green) { showGreenPicker() }
+        val bo = iconBtn(R.drawable.ic_dot_orange) { showOrangePicker() }
+        val bp = iconBtn(R.drawable.ic_dot_pink) { showPinkPicker() }
+        val btm = iconBtn(R.drawable.ic_dot_timer) { showTimerPicker() }
+        val bc = iconBtn(R.drawable.ic_trash) {
             cfg.setTaps(emptyList())
             Toast.makeText(this, "Точки очищены", Toast.LENGTH_SHORT).show()
         }
@@ -314,7 +333,7 @@ class ClickerService : AccessibilityService() {
         if (running) {
             running = false
             handler.removeCallbacksAndMessages(null)
-            toggleBtn?.text = "▶"
+            toggleBtn?.setImageResource(R.drawable.ic_play); toggleBtn?.imageTintList = null
             tools.forEach { it.visibility = View.VISIBLE }
             statusView?.visibility = View.GONE
             return
@@ -325,12 +344,18 @@ class ClickerService : AccessibilityService() {
         }
         running = true
         pendingKey = null
+        streakOut = 0
+        streakUnp = 0
+        cancelTries = 0
+        blankStreak = 0
+        lastBidAt = 0L
+        lastBidTarget = null
         val t0 = SystemClock.elapsedRealtime()
         greenNext = t0 + (cfg.greenSec * 1000).toLong()
         timerIdx = 0
         timerNext = t0 // первая точка срабатывает сразу
         timerCount = cfg.getTimers().size
-        toggleBtn?.text = "■"
+        toggleBtn?.setImageResource(R.drawable.ic_stop); toggleBtn?.imageTintList = ColorStateList.valueOf(Ui.ORANGE)
         tools.forEach { it.visibility = View.GONE }
         statusView?.visibility = View.VISIBLE
         setStatus("работает…")
@@ -444,78 +469,152 @@ class ClickerService : AccessibilityService() {
         val a = parseNum(t1)
         val b = parseNum(t2)
         if (a == null || b == null) {
+            // не прочитали: ничего не решаем, счётчики не сбрасываем
             setStatus("не прочитал: '${t1.take(12)}' / '${t2.take(12)}'")
             schedule(cfg.interval.toLong())
             return
         }
-        // Область 3: если там то же число, что в области 2 — наш запрос уже стоит, перебивать не нужно
-        val cc = if (t3 != null) parseNum(t3) else null
-        if (cc != null && cc == b) {
-            pendingKey = null
-            cancelTries = 0
-            setStatus("1: $a\n2: $b\n3: $cc\nобласть 3 = область 2 → пропуск")
-            schedule(cfg.interval.toLong())
-            return
-        }
-        // Комиссию вычитаем из выбранной области (1 или 2), сравниваем с другой
+        val now = SystemClock.elapsedRealtime()
+        val delayMs = cfg.interval.toLong()
+        val hasR3 = cfg.getRect(3) != null
+        val pinks = cfg.getPinks()
         val feeOn2 = cfg.feeRegion == 2
         val src = if (feeOn2) b else a
         val ref = if (feeOn2) a else b
         val adj = src * (1 - cfg.fee / 100.0)
-        val ok = if (cfg.mode == 0) adj >= ref * (1 - cfg.margin / 100.0)
-        else adj >= ref - cfg.margin
+        val ok = if (cfg.mode == 0) adj >= ref * (1 - cfg.margin / 100.0) else adj >= ref - cfg.margin
         val head = if (feeOn2) "1: $a\n2: $b → ${"%.2f".format(adj)}\n"
         else "1: $a → ${"%.2f".format(adj)}\n2: $b\n"
-        if (!ok) {
-            pendingKey = null
-            val pinks = cfg.getPinks()
-            if (pinks.isNotEmpty()) {
-                setStatus(head + "пропуск ✘ → розовая")
-                runTaps(pinks, cfg.interval.toLong())
-            } else {
-                setStatus(head + "пропуск ✘")
-                schedule(cfg.interval.toLong())
+        val holding = now - lastBidAt < cfg.holdAfterBid
+
+        // Наш запрос: число из области 3. Пусто — запроса нет. Нечитаемый или неполный текст — ничего не делаем
+        var ownVar: Double? = if (hasR3) null else lastBidTarget
+        if (hasR3) {
+            val txt = t3?.trim() ?: ""
+            if (txt.isNotEmpty()) {
+                val v = parseNum(txt)
+                // неполное распознавание («17» вместо «172») запросом не считаем
+                if (v == null || v.toLong().toString().length != b.toLong().toString().length) {
+                    setStatus(head + "область 3 не прочитана: '${txt.take(12)}'")
+                    schedule(delayMs)
+                    return
+                }
+                ownVar = v
             }
+        }
+        val own: Double? = ownVar
+        blankStreak = if (own == null) blankStreak + 1 else 0
+
+        // 1. Невыгодно: отменяем свой запрос, только если он стоит и невыгодность подтверждена несколько раз подряд
+        if (!ok) {
+            streakOut = 0
+            pendingKey = null
+            if (own != null && pinks.isNotEmpty()) {
+                streakUnp++
+                if (streakUnp >= cfg.confirmCount) {
+                    streakUnp = 0
+                    cancelOwn(head, pinks, "пропуск ✘ → отменяю свой запрос")
+                    return
+                }
+                setStatus(head + "пропуск ✘ (${streakUnp}/${cfg.confirmCount})")
+            } else {
+                streakUnp = 0
+                setStatus(head + "пропуск ✘")
+            }
+            schedule(delayMs)
             return
         }
-        val now = SystemClock.elapsedRealtime()
-        // Область 3 пустая — своего запроса нет (или отмена прошла)
-        if (cc == null) cancelTries = 0
-        // Наш запрос стоит (область 3), но его перебили (3 ≠ 2), и сделка всё ещё выгодна:
-        // сначала отменяем свой запрос розовыми, а перебиваем уже на следующем проходе — когда запроса не будет
-        if (cc != null && cancelTries < 2) {
-            val pinks = cfg.getPinks()
-            if (pinks.isNotEmpty()) {
-                cancelTries++
-                pendingKey = null
-                lastCancelAt = now
-                setStatus(head + "3: $cc ≠ 2: $b → отменяю свой запрос (розовая), потом перебью")
-                runTaps(pinks, cfg.cancelWait.toLong())
+        streakUnp = 0
+
+        // 2. Выгодно и наш запрос стоит не ниже верхней цены: не трогаем
+        if (own != null && own >= b) {
+            streakOut = 0
+            pendingKey = null
+            cancelTries = 0
+            setStatus(head + "запрос стоит ✔")
+            schedule(delayMs)
+            return
+        }
+
+        // 3. Выгодно, но нас перебили: отменяем свой запрос, потом ставим выше (только после подтверждений)
+        if (own != null) {
+            pendingKey = null
+            if (holding) {
+                setStatus(head + "ждём обновления после ставки")
+                schedule(delayMs)
                 return
             }
+            if (pinks.isEmpty()) {
+                setStatus(head + "перебили, нет розовых точек для отмены")
+                schedule(delayMs)
+                return
+            }
+            if (cancelTries >= MAX_CANCEL) {
+                setStatus(head + "отмена не сработала, проверьте розовые точки")
+                schedule(cfg.cooldown.toLong())
+                return
+            }
+            streakOut++
+            if (streakOut < cfg.confirmCount) {
+                setStatus(head + "перебили (${streakOut}/${cfg.confirmCount})")
+                schedule(delayMs)
+                return
+            }
+            streakOut = 0
+            cancelTries++
+            cancelOwn(head, pinks, "перебили → отменяю свой запрос")
+            return
         }
-        // Условие выполнено: ждём, пока числа не меняются заданное время
+        streakOut = 0
+
+        // 4. Своего запроса не видно: ставим, только если пусто несколько проверок подряд
+        //    и наша прошлая ставка уже не на верху
+        cancelTries = 0
+        if (blankStreak < cfg.confirmCount) {
+            setStatus(head + "запроса нет (${blankStreak}/${cfg.confirmCount})")
+            schedule(delayMs)
+            return
+        }
+        val lastTop = lastBidTarget
+        if (lastTop != null && b <= lastTop) {
+            setStatus(head + "наша ставка на верху, жду")
+            schedule(delayMs)
+            return
+        }
+        if (holding) {
+            setStatus(head + "ждём обновления после ставки")
+            schedule(delayMs)
+            return
+        }
+        // цены должны не меняться заданное время
         val key = "$a|$b"
         if (key != pendingKey) {
             pendingKey = key
             pendingSince = now
         }
         val waited = now - pendingSince
-        // Сразу после отмены своего запроса не ждём подтверждения — перебиваем без задержки
-        val afterCancel = cc == null && lastCancelAt != 0L && now - lastCancelAt < 5000
-        if (waited >= cfg.confirmDelay || afterCancel) {
-            pendingKey = null
-            lastCancelAt = 0L
-            val seq = buildSequence(a, b, head)
-            if (seq == null) {
-                schedule(cfg.interval.toLong())
-            } else {
-                runSteps(seq, 0, 0) { schedule(cfg.cooldown.toLong()) }
-            }
-        } else {
+        if (waited < cfg.confirmDelay) {
             setStatus(head + "ждём ${waited}/${cfg.confirmDelay} мс")
-            schedule(cfg.interval.toLong())
+            schedule(delayMs)
+            return
         }
+        pendingKey = null
+        val seq = buildSequence(a, b, head)
+        if (seq == null) {
+            schedule(delayMs)
+            return
+        }
+        lastBidAt = now
+        val base = Math.floor(if (cfg.outbidRegion == 1) a else b).toLong()
+        lastBidTarget = if (cfg.getDigits().any { it != null }) (base + cfg.step).toDouble() else b
+        runSteps(seq, 0, 0) { schedule(cfg.cooldown.toLong()) }
+    }
+
+    /** Отмена своего запроса розовыми точками. Перебитие пойдёт на следующих проверках, когда запроса уже нет */
+    private fun cancelOwn(head: String, pinks: List<Pt>, msg: String) {
+        setStatus(head + msg)
+        lastBidTarget = null
+        runTaps(pinks, cfg.cancelWait.toLong())
     }
 
     // ---------- Нажатия по порядку ----------

@@ -60,6 +60,16 @@ class Prefs(c: Context) {
         get() = sp.getInt("cancelWait", 800)
         set(v) { sp.edit().putInt("cancelWait", v).apply() }
 
+    /** Сколько одинаковых проверок подряд нужно, прежде чем отменять свой запрос или ставить */
+    var confirmCount: Int
+        get() = sp.getInt("confirmCount", 3)
+        set(v) { sp.edit().putInt("confirmCount", v).apply() }
+
+    /** Пауза после нашей ставки, мс: в это время ничего не отменяем и не ставим повторно */
+    var holdAfterBid: Int
+        get() = sp.getInt("holdAfterBid", 8000)
+        set(v) { sp.edit().putInt("holdAfterBid", v).apply() }
+
     /** Пауза после срабатывания, мс */
     var cooldown: Int
         get() = sp.getInt("cooldown", 3000)
