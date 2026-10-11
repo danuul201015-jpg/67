@@ -1,15 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<<<<<<< HEAD
     <application
         android:allowBackup="false"
         android:label="@string/app_name"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true">
+=======
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:label="MC Mod Builder"
+        android:theme="@style/Theme.MCModBuilder"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.MCModBuilder">
+>>>>>>> dfdf6074b41ac12125ae38f34e37f92dedc06a9b
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+<<<<<<< HEAD
         <service
             android:name=".ClickerService"
             android:exported="true"
@@ -23,4 +40,9 @@
                 android:resource="@xml/accessibility_config" />
         </service>
     </application>
+=======
+
+    </application>
+
+>>>>>>> dfdf6074b41ac12125ae38f34e37f92dedc06a9b
 </manifest>

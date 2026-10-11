@@ -1,4 +1,8 @@
 <resources>
+<<<<<<< HEAD
     <string name="app_name">АвтоКликер</string>
     <string name="service_desc">Читает числа в заданных областях экрана и нажимает заданные точки.</string>
+=======
+    <string name="app_name">MC Mod Builder</string>
+>>>>>>> dfdf6074b41ac12125ae38f34e37f92dedc06a9b
 </resources>
