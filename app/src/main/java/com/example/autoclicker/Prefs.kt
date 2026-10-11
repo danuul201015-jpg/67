@@ -16,6 +16,11 @@ class Prefs(c: Context) {
         get() = sp.getFloat("fee", 20f).toDouble()
         set(v) { sp.edit().putFloat("fee", v.toFloat()).apply() }
 
+    /** Из какой области вычитается комиссия: 1 (по умолчанию) или 2 */
+    var feeRegion: Int
+        get() = sp.getInt("feeRegion", 1)
+        set(v) { sp.edit().putInt("feeRegion", v).apply() }
+
     /** 0 = допустимый минус в процентах, 1 = допустимый минус в сумме */
     var mode: Int
         get() = sp.getInt("mode", 0)
@@ -44,6 +49,16 @@ class Prefs(c: Context) {
     var tapDelay: Int
         get() = sp.getInt("tapDelay", 100)
         set(v) { sp.edit().putInt("tapDelay", v).apply() }
+
+    /** Пауза между нажатиями цифр (синие точки), мс — чтобы приложение не теряло цифры */
+    var digitDelay: Int
+        get() = sp.getInt("digitDelay", 250)
+        set(v) { sp.edit().putInt("digitDelay", v).apply() }
+
+    /** Пауза после отмены своего запроса (розовые точки) перед следующей проверкой, мс */
+    var cancelWait: Int
+        get() = sp.getInt("cancelWait", 800)
+        set(v) { sp.edit().putInt("cancelWait", v).apply() }
 
     /** Пауза после срабатывания, мс */
     var cooldown: Int

@@ -47,6 +47,12 @@ class ClickerService : AccessibilityService() {
     private var timerIdx = 0
     private var timerNext = 0L
     private var timerCount = 0
+    // Отмена своего запроса перед перебитием
+    private var lastCancelAt = 0L
+    private var cancelTries = 0
+
+    /** Одно нажатие + пауза после него */
+    private data class Step(val x: Float, val y: Float, val delay: Long)
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -363,7 +369,7 @@ class ClickerService : AccessibilityService() {
         }
         if (due.isNotEmpty()) {
             setStatus("таймеры / зелёные…")
-            runTaps(due, 0, cfg.interval.toLong())
+            runTaps(due, cfg.interval.toLong())
             return
         }
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor,
@@ -446,41 +452,65 @@ class ClickerService : AccessibilityService() {
         val cc = if (t3 != null) parseNum(t3) else null
         if (cc != null && cc == b) {
             pendingKey = null
+            cancelTries = 0
             setStatus("1: $a\n2: $b\n3: $cc\nобласть 3 = область 2 → пропуск")
             schedule(cfg.interval.toLong())
             return
         }
-        val adj = a * (1 - cfg.fee / 100.0)
-        val ok = if (cfg.mode == 0) adj >= b * (1 - cfg.margin / 100.0)
-        else adj >= b - cfg.margin
-        val head = "1: $a → ${"%.2f".format(adj)}\n2: $b\n"
+        // Комиссию вычитаем из выбранной области (1 или 2), сравниваем с другой
+        val feeOn2 = cfg.feeRegion == 2
+        val src = if (feeOn2) b else a
+        val ref = if (feeOn2) a else b
+        val adj = src * (1 - cfg.fee / 100.0)
+        val ok = if (cfg.mode == 0) adj >= ref * (1 - cfg.margin / 100.0)
+        else adj >= ref - cfg.margin
+        val head = if (feeOn2) "1: $a\n2: $b → ${"%.2f".format(adj)}\n"
+        else "1: $a → ${"%.2f".format(adj)}\n2: $b\n"
         if (!ok) {
             pendingKey = null
             val pinks = cfg.getPinks()
             if (pinks.isNotEmpty()) {
                 setStatus(head + "пропуск ✘ → розовая")
-                runTaps(pinks, 0, cfg.interval.toLong())
+                runTaps(pinks, cfg.interval.toLong())
             } else {
                 setStatus(head + "пропуск ✘")
                 schedule(cfg.interval.toLong())
             }
             return
         }
+        val now = SystemClock.elapsedRealtime()
+        // Область 3 пустая — своего запроса нет (или отмена прошла)
+        if (cc == null) cancelTries = 0
+        // Наш запрос стоит (область 3), но его перебили (3 ≠ 2), и сделка всё ещё выгодна:
+        // сначала отменяем свой запрос розовыми, а перебиваем уже на следующем проходе — когда запроса не будет
+        if (cc != null && cancelTries < 2) {
+            val pinks = cfg.getPinks()
+            if (pinks.isNotEmpty()) {
+                cancelTries++
+                pendingKey = null
+                lastCancelAt = now
+                setStatus(head + "3: $cc ≠ 2: $b → отменяю свой запрос (розовая), потом перебью")
+                runTaps(pinks, cfg.cancelWait.toLong())
+                return
+            }
+        }
         // Условие выполнено: ждём, пока числа не меняются заданное время
         val key = "$a|$b"
-        val now = SystemClock.elapsedRealtime()
         if (key != pendingKey) {
             pendingKey = key
             pendingSince = now
         }
         val waited = now - pendingSince
-        if (waited >= cfg.confirmDelay) {
+        // Сразу после отмены своего запроса не ждём подтверждения — перебиваем без задержки
+        val afterCancel = cc == null && lastCancelAt != 0L && now - lastCancelAt < 5000
+        if (waited >= cfg.confirmDelay || afterCancel) {
             pendingKey = null
+            lastCancelAt = 0L
             val seq = buildSequence(a, b, head)
             if (seq == null) {
                 schedule(cfg.interval.toLong())
             } else {
-                runTaps(seq, 0, cfg.cooldown.toLong())
+                runSteps(seq, 0, 0) { schedule(cfg.cooldown.toLong()) }
             }
         } else {
             setStatus(head + "ждём ${waited}/${cfg.confirmDelay} мс")
@@ -493,11 +523,15 @@ class ClickerService : AccessibilityService() {
     /**
      * Собирает последовательность нажатий.
      * Синие точки не заданы — как раньше: только красные точки.
-     * Синие заданы — перебитие: красные → цифры новой цены (число выбранной области + шаг) → красные ещё раз.
+     * Синие заданы — перебитие: красные → цифры новой цены (число выбранной области + шаг) → оранжевые → красные.
+     * Между цифрами — отдельная пауза (digitDelay), чтобы приложение не теряло нажатия.
      * Возвращает null, если для нужной цифры нет синей точки.
      */
-    private fun buildSequence(a: Double, b: Double, head: String): List<Pt>? {
-        val red = cfg.getTaps()
+    private fun buildSequence(a: Double, b: Double, head: String): List<Step>? {
+        val td = cfg.tapDelay.toLong()
+        val dd = maxOf(cfg.digitDelay, cfg.tapDelay).toLong()
+        fun steps(l: List<Pt>) = l.map { Step(it.x, it.y, td) }
+        val red = steps(cfg.getTaps())
         val digits = cfg.getDigits()
         if (digits.all { it == null }) {
             setStatus(head + "ЗАКАЗЫВАЮ ✔")
@@ -505,37 +539,51 @@ class ClickerService : AccessibilityService() {
         }
         val base = Math.floor(if (cfg.outbidRegion == 1) a else b).toLong()
         val target = base + cfg.step
-        val typed = mutableListOf<Pt>()
+        val typed = mutableListOf<Step>()
         for (ch in target.toString()) {
             val p = digits[ch - '0']
             if (p == null) {
                 setStatus(head + "нет синей точки для цифры $ch")
                 return null
             }
-            typed.add(p)
+            typed.add(Step(p.x, p.y, dd))
         }
         setStatus(head + "перебиваю область ${cfg.outbidRegion}: $base → $target ✔")
         // красные → синие (цифры) → оранжевые → красные
-        return red + typed + cfg.getOranges() + red
+        return red + typed + steps(cfg.getOranges()) + red
     }
 
-    private fun runTaps(taps: List<Pt>, i: Int, endDelay: Long) {
+    private fun runTaps(taps: List<Pt>, endDelay: Long) {
+        val d = cfg.tapDelay.toLong()
+        runSteps(taps.map { Step(it.x, it.y, d) }, 0, 0) { schedule(endDelay) }
+    }
+
+    /**
+     * Нажимает шаги по очереди. Если нажатие отменено системой или не отправилось —
+     * повторяет его (до 2 раз), а не пропускает: раньше из-за этого терялись цифры (172 → 12).
+     */
+    private fun runSteps(steps: List<Step>, i: Int, tries: Int, onEnd: () -> Unit) {
         if (!running) return
-        if (i >= taps.size) { schedule(endDelay); return }
+        if (i >= steps.size) { onEnd(); return }
+        val st = steps[i]
         val path = Path()
-        path.moveTo(taps[i].x, taps[i].y)
+        path.moveTo(st.x, st.y)
         val g = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 60))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 50))
             .build()
-        val next = Runnable { runTaps(taps, i + 1, endDelay) }
+        val next = Runnable { runSteps(steps, i + 1, 0, onEnd) }
+        val again = Runnable { runSteps(steps, i, tries + 1, onEnd) }
+        fun retryOrSkip() {
+            if (tries < 2) handler.postDelayed(again, 150L) else handler.postDelayed(next, st.delay)
+        }
         val started = dispatchGesture(g, object : GestureResultCallback() {
             override fun onCompleted(d: GestureDescription?) {
-                handler.postDelayed(next, cfg.tapDelay.toLong())
+                handler.postDelayed(next, st.delay)
             }
             override fun onCancelled(d: GestureDescription?) {
-                handler.postDelayed(next, cfg.tapDelay.toLong())
+                retryOrSkip()
             }
         }, null)
-        if (!started) schedule(cfg.interval.toLong())
+        if (!started) retryOrSkip()
     }
 }

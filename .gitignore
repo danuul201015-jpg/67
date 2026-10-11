@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 .gradle/
 build/
 local.properties
 .idea/
 *.iml
-=======
-node_modules/
-android/
->>>>>>> dfdf6074b41ac12125ae38f34e37f92dedc06a9b
