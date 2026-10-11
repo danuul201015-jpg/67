@@ -39,6 +39,8 @@ class ClickerService : AccessibilityService() {
     private var panel: LinearLayout? = null
     private lateinit var panelLp: WindowManager.LayoutParams
     private var statusView: TextView? = null
+    private var collapsed = false
+    private var fadeAnim: android.animation.ValueAnimator? = null
     private val tools = mutableListOf<View>()
     private var toggleBtn: ImageView? = null
     private var running = false
@@ -131,15 +133,19 @@ class ClickerService : AccessibilityService() {
 
         val handle = iconBtn(R.drawable.ic_grip)
         handle.setOnTouchListener(object : View.OnTouchListener {
-            var sx = 0f; var sy = 0f; var ox = 0; var oy = 0
+            var sx = 0f; var sy = 0f; var ox = 0; var oy = 0; var moved = false
             override fun onTouch(v: View, e: MotionEvent): Boolean {
                 when (e.action) {
-                    MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = panelLp.x; oy = panelLp.y }
+                    MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = panelLp.x; oy = panelLp.y; moved = false }
                     MotionEvent.ACTION_MOVE -> {
-                        panelLp.x = ox + (e.rawX - sx).toInt()
-                        panelLp.y = oy + (e.rawY - sy).toInt()
-                        wm.updateViewLayout(p, panelLp)
+                        if (Math.abs(e.rawX - sx) > 12f || Math.abs(e.rawY - sy) > 12f) moved = true
+                        if (moved) {
+                            panelLp.x = ox + (e.rawX - sx).toInt()
+                            panelLp.y = oy + (e.rawY - sy).toInt()
+                            wm.updateViewLayout(p, panelLp)
+                        }
                     }
+                    MotionEvent.ACTION_UP -> if (!moved) togglePanel()
                 }
                 return true
             }
@@ -172,6 +178,39 @@ class ClickerService : AccessibilityService() {
         add(st)
 
         wm.addView(p, panelLp)
+    }
+
+    /** Сворачивает панель до полоски ≡ и раскрывает обратно: кнопки плавно уходят и возвращаются */
+    private fun togglePanel() {
+        collapsed = !collapsed
+        fadeAnim?.cancel()
+        val items: List<View> = tools + listOfNotNull(toggleBtn, statusView)
+        fun shownNow(v: View): Boolean = when {
+            v === statusView -> running
+            v === toggleBtn -> true
+            else -> !running
+        }
+        if (!collapsed) {
+            items.forEach {
+                it.visibility = if (shownNow(it)) View.VISIBLE else View.GONE
+                it.alpha = 0f
+            }
+        }
+        val from = if (collapsed) 1f else 0f
+        val to = if (collapsed) 0f else 1f
+        fadeAnim = android.animation.ValueAnimator.ofFloat(from, to).apply {
+            duration = 220
+            addUpdateListener { va ->
+                val a = va.animatedValue as Float
+                items.forEach { it.alpha = a }
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (collapsed) items.forEach { it.visibility = View.GONE }
+                }
+            })
+            start()
+        }
     }
 
     private fun setStatus(s: String) {

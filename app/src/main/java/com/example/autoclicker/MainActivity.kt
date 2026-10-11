@@ -62,6 +62,10 @@ class MainActivity : Activity() {
     private var timerList = mutableListOf<TimerBtn>()
     private val timerFields = mutableListOf<EditText>()
     private var pulseSet: AnimatorSet? = null
+    private lateinit var backupLabel: TextView
+    private lateinit var presetName: EditText
+    private lateinit var presetsBox: LinearLayout
+    private var skipSaveOnce = false
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -105,6 +109,11 @@ class MainActivity : Activity() {
 Отмена своего запроса (нужны область 3 и розовые точки): если ваш запрос в области 3 ниже числа области 2 (вас перебили) и сделка всё ещё выгодна, розовые нажимаются только после нескольких одинаковых проверок подряд («Одинаковых проверок подряд»). После своей ставки приложение ждёт «Пауза после своей ставки» и ничего не отменяет. Если своего запроса нет, розовые не нажимаются.
 """.trimIndent()
 
+    companion object {
+        private const val REQ_CREATE = 101
+        private const val REQ_OPEN = 102
+    }
+
     private fun dp(v: Int) = Ui.dp(this, v)
     private fun fmt(d: Double) = if (d == Math.floor(d)) d.toLong().toString() else d.toString()
 
@@ -125,6 +134,7 @@ class MainActivity : Activity() {
         buildTuning()
         buildTimers()
         buildStats()
+        buildBackup()
         buildHelp()
         root.addView(primaryButton("Сохранить") {
             save()
@@ -324,6 +334,151 @@ class MainActivity : Activity() {
             }
         }
         return sb
+    }
+
+    // ---------- Резервная копия и пресеты ----------
+
+    private fun buildBackup() {
+        val c = card("Резервная копия и пресеты")
+        backupLabel = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Ui.DIM)
+            setPadding(dp(2), 0, 0, dp(10))
+        }
+        c.addView(backupLabel)
+        updateBackupLabel()
+        c.addView(outlineButton("Выбрать файл копии") { pickBackupFile() })
+        c.addView(outlineButton("Загрузить из файла") { openBackupFile() })
+        presetName = field(c, "Название нового пресета", "")
+        c.addView(outlineButton("Сохранить текущие настройки как пресет") {
+            val name = presetName.text.toString().trim()
+            if (name.isEmpty()) {
+                Toast.makeText(this@MainActivity, "Введите название пресета", Toast.LENGTH_SHORT).show()
+                return@outlineButton
+            }
+            save()
+            Backup.savePreset(this@MainActivity, name)
+            presetName.setText("")
+            buildPresets()
+            Toast.makeText(this@MainActivity, "Пресет «$name» сохранён", Toast.LENGTH_SHORT).show()
+        })
+        presetsBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        c.addView(presetsBox)
+        buildPresets()
+    }
+
+    private fun updateBackupLabel() {
+        val uri = Backup.backupUri(this)
+        backupLabel.text = if (uri == null) {
+            "Копия не выбрана. Выберите файл, например в Загрузках: после этого настройки сохраняются в него сами."
+        } else {
+            "Копия сохраняется в файл: ${uri.lastPathSegment ?: "выбран"}"
+        }
+    }
+
+    private fun buildPresets() {
+        presetsBox.removeAllViews()
+        val names = Backup.presetNames(this)
+        if (names.isEmpty()) {
+            presetsBox.addView(labelView("Пресетов пока нет"))
+            return
+        }
+        names.forEach { name ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = Ui.round(this@MainActivity, Ui.SURFACE2, 14)
+                setPadding(dp(12), dp(6), dp(6), dp(6))
+                layoutParams = LinearLayout.LayoutParams(MP, WC).apply { bottomMargin = dp(8) }
+            }
+            row.addView(TextView(this).apply {
+                text = name
+                textSize = 15f
+                setTextColor(Ui.TEXT)
+                layoutParams = LinearLayout.LayoutParams(0, WC, 1f)
+            })
+            row.addView(TextView(this).apply {
+                text = "Загрузить"
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Ui.ORANGE)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                setOnClickListener {
+                    skipSaveOnce = true
+                    if (Backup.loadPreset(this@MainActivity, name)) {
+                        recreate()
+                    } else {
+                        skipSaveOnce = false
+                    }
+                }
+            })
+            row.addView(ImageView(this).apply {
+                setImageResource(R.drawable.ic_trash)
+                imageTintList = ColorStateList.valueOf(Ui.RED)
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                setOnClickListener {
+                    Backup.deletePreset(this@MainActivity, name)
+                    buildPresets()
+                    Backup.autoWrite(this@MainActivity)
+                }
+            })
+            presetsBox.addView(row)
+        }
+    }
+
+    private fun outlineButton(t: String, onClick: () -> Unit): TextView = TextView(this).apply {
+        text = t
+        textSize = 15f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Ui.ORANGE)
+        gravity = Gravity.CENTER
+        background = Ui.round(this@MainActivity, Color.TRANSPARENT, 14, Ui.ORANGE)
+        setPadding(dp(14), dp(12), dp(14), dp(12))
+        layoutParams = LinearLayout.LayoutParams(MP, WC).apply { bottomMargin = dp(10) }
+        setOnClickListener { onClick() }
+    }
+
+    private fun pickBackupFile() {
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            putExtra(Intent.EXTRA_TITLE, "autoclicker_backup.json")
+        }, REQ_CREATE)
+    }
+
+    private fun openBackupFile() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }, REQ_OPEN)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        when (requestCode) {
+            REQ_CREATE -> {
+                try { contentResolver.takePersistableUriPermission(uri, flags) } catch (e: Exception) { }
+                Backup.setBackupUri(this, uri)
+                save()
+                updateBackupLabel()
+                Toast.makeText(this, "Копия будет сохраняться в выбранный файл", Toast.LENGTH_SHORT).show()
+            }
+            REQ_OPEN -> {
+                val text = Backup.readText(this, uri)
+                if (text == null || !Backup.importText(this, text)) {
+                    Toast.makeText(this, "Файл не похож на копию АвтоКликера", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                try { contentResolver.takePersistableUriPermission(uri, flags) } catch (e: Exception) { }
+                Backup.setBackupUri(this, uri)
+                skipSaveOnce = true
+                recreate()
+            }
+        }
     }
 
     // ---------- Конструкторы элементов ----------
@@ -624,10 +779,15 @@ class MainActivity : Activity() {
         p.mode = modeSeg.tag as Int
         p.feeRegion = (feeSeg.tag as Int) + 1
         p.outbidRegion = (outSeg.tag as Int) + 1
+        Backup.autoWrite(this)
     }
 
     override fun onPause() {
         super.onPause()
+        if (skipSaveOnce) {
+            skipSaveOnce = false
+            return
+        }
         save()
     }
 

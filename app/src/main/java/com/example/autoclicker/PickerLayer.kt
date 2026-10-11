@@ -115,7 +115,7 @@ class PickerLayer(
             }
             invalidate()
         } else if (e.actionMasked == MotionEvent.ACTION_UP) {
-            if (timerMode) timers.add(TimerBtn(e.rawX, e.rawY, 60.0))
+            if (timerMode) timers.add(TimerBtn(e.rawX, e.rawY, 10.0))
             else list.add(Pt(e.rawX, e.rawY))
             invalidate()
         }
